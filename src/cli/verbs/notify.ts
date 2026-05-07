@@ -1,9 +1,9 @@
 import { parseArgs } from 'node:util';
 import { DEFAULT_PORT, fail, ok, parsePort, postToSendApi } from '../lib';
 
-export const notifyUsage = `Usage: maestro-discord notify <toast|flash> [options]
+export const notifyUsage = `Usage: maestro-relay notify <toast|flash> [options]
 
-Post a styled notification message to an agent's Discord channel. Color maps
+Post a styled notification message to an agent's bridge channel. Color maps
 to a leading emoji so the alert stands out from regular messages.
 
 Subcommands:
@@ -12,6 +12,7 @@ Subcommands:
 
 Options:
   -a, --agent <id>      Maestro agent ID (required)
+      --provider <name> Provider/module name (default: discord)
   -t, --title <text>    Title line (toast only, required)
   -m, --message <text>  Body text (required)
   -D, --detail <text>   Second line (flash only, optional)
@@ -53,6 +54,7 @@ export async function runNotify(argv: string[]): Promise<void> {
       args: rest,
       options: {
         agent: { type: 'string', short: 'a' },
+        provider: { type: 'string' },
         title: { type: 'string', short: 't' },
         message: { type: 'string', short: 'm' },
         detail: { type: 'string', short: 'D' },
@@ -98,7 +100,12 @@ export async function runNotify(argv: string[]): Promise<void> {
 
   try {
     const result = await postToSendApi(
-      { agentId, message: content, mention: parsed.values.mention },
+      {
+        agentId,
+        message: content,
+        provider: parsed.values.provider,
+        mention: parsed.values.mention,
+      },
       port,
     );
     ok(result);

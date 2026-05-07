@@ -46,7 +46,7 @@ jobs:
         id: package
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          staging="maestro-discord-${tag}"
+          staging="maestro-relay-${tag}"
           mkdir -p "$staging"
           cp -R dist "$staging/"
           cp -R bin templates "$staging/"

@@ -1,59 +1,63 @@
-# Discord Maestro Bot
+# Maestro Relay
 
 [![Made with Maestro](https://raw.githubusercontent.com/RunMaestro/Maestro/main/docs/assets/made-with-maestro.svg)](https://github.com/RunMaestro/Maestro)
 
-A Discord bot that connects your server to [Maestro](https://runmaestro.ai) AI agents through `maestro-cli`.
+**Maestro Relay** connects chat platforms to [Maestro](https://runmaestro.ai) AI agents through `maestro-cli`. Discord ships in the box; Slack, Teams, and others can be added by dropping in a provider adapter — the kernel is provider-agnostic.
+
+> **Migrating from `discord-maestro`?** Same codebase, new name. The legacy `maestro-discord` binary is preserved as an alias and all `DISCORD_*` env vars work unchanged. See "Migration" below.
 
 ## Features
 
-- Creates dedicated Discord channels for Maestro agents
-- Per-user session threads — start one with `/session new` or by @mentioning the bot in an agent channel
-- Queues messages per channel for orderly processing
-- Streams agent replies back into Discord, including usage stats
+- Provider-pluggable kernel — Discord today, Slack/Teams next
+- Creates dedicated channels for Maestro agents
+- Per-user session threads (`/session new` or by mentioning the bot)
+- Per-conversation FIFO queue with typing/reaction indicators
+- Streams agent replies back into chat with usage stats
+- Voice transcription pipeline (whisper.cpp) for Discord voice messages
 
 ## Prerequisites
 
-- Linux or macOS
 - Node.js 22+
-- A Discord application + bot token
+- A Discord application + bot token (if running the Discord provider)
 - [Maestro CLI](https://docs.runmaestro.ai/cli) on your `PATH`
 
-## Install (production)
-
-One command — downloads the latest tagged release, installs dependencies, prompts for Discord credentials, and registers a user-level service.
+## Install (production one-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RunMaestro/Maestro-Discord/main/install.sh | bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/RunMaestro/Maestro-Relay/main/install.sh)"
 ```
 
 After install:
 
 ```bash
-maestro-discord-ctl start     # boot the bot
-maestro-discord-ctl logs      # tail logs
-maestro-discord-ctl status    # service status
-maestro-discord-ctl update    # upgrade to latest release (preserves config)
-maestro-discord-ctl uninstall # remove install + service files
+maestro-relay-ctl start     # boot the bot
+maestro-relay-ctl logs      # tail logs
+maestro-relay-ctl status    # service status
+maestro-relay-ctl update    # upgrade to latest release (preserves config)
+maestro-relay-ctl uninstall # remove install + service files
 ```
 
-Defaults:
+The legacy aliases `maestro-bridge-ctl` and `maestro-discord-ctl` still work for back-compat.
+
+## Quick start
 
 | Path                          | Purpose                                  |
 | ----------------------------- | ---------------------------------------- |
-| `~/.local/share/maestro-discord/` | Installed bot (built JS + dependencies) |
-| `~/.config/maestro-discord/.env`  | Configuration (preserved across updates) |
-| `~/.local/bin/maestro-discord-ctl` | Service control wrapper             |
+| `~/.local/share/maestro-relay/` | Installed bot (built JS + dependencies) |
+| `~/.config/maestro-relay/.env`  | Configuration (preserved across updates) |
+| `~/.local/bin/maestro-relay-ctl` | Service control wrapper             |
 | systemd user / launchd agent  | Auto-start unit                          |
 
-Override any of these with `MAESTRO_DISCORD_HOME`, `XDG_CONFIG_HOME`, or `MAESTRO_DISCORD_BIN_DIR`. Pin a specific version with `MAESTRO_DISCORD_VERSION=v1.0.0`.
+Override any of these with `MAESTRO_RELAY_HOME`, `XDG_CONFIG_HOME`, or `MAESTRO_RELAY_BIN_DIR`. Pin a specific version with `MAESTRO_RELAY_VERSION=v1.0.0`.
+Choose a provider module at install time via `MAESTRO_RELAY_MODULE` (currently only `discord` is supported).
 
 ## Install (development from source)
 
 1. Clone and install:
 
 ```bash
-git clone https://github.com/RunMaestro/Maestro-Discord.git
-cd Maestro-Discord
+git clone https://github.com/RunMaestro/Maestro-Relay.git
+cd Maestro-Relay
 npm install
 ```
 
@@ -66,60 +70,36 @@ cp .env.example .env
 Set these values in `.env`:
 
 ```
-DISCORD_BOT_TOKEN=   # Bot token from Discord Developer Portal
-DISCORD_CLIENT_ID=   # Application ID from Discord Developer Portal
-DISCORD_GUILD_ID=    # Your server's ID (right-click server → Copy ID)
-DISCORD_ALLOWED_USER_IDS=123,456  # Optional: comma-separated user IDs allowed to run slash commands
-API_PORT=3457                     # Optional: port for internal API (default 3457)
-DISCORD_MENTION_USER_ID=          # Optional: Discord user ID to @mention when --mention is used
-FFMPEG_PATH=/opt/homebrew/bin/ffmpeg                # Optional: path to ffmpeg binary
-WHISPER_CLI_PATH=/opt/homebrew/bin/whisper-cli      # Optional: path to whisper-cli binary
-WHISPER_MODEL_PATH=models/ggml-base.en.bin          # Optional: path to whisper.cpp model
+# Core
+ENABLED_PROVIDERS=discord    # comma-separated; default 'discord'
+API_PORT=3457                # optional, default 3457
+
+# Discord provider
+DISCORD_BOT_TOKEN=           # Bot token from Discord Developer Portal
+DISCORD_CLIENT_ID=           # Application ID from Discord Developer Portal
+DISCORD_GUILD_ID=            # Your server's ID (right-click server → Copy ID)
+DISCORD_ALLOWED_USER_IDS=123,456   # Optional: comma-separated allowed user IDs
+DISCORD_MENTION_USER_ID=     # Optional: user ID to @mention when --mention is used
+
+# Voice transcription (optional)
+FFMPEG_PATH=/opt/homebrew/bin/ffmpeg
+WHISPER_CLI_PATH=/opt/homebrew/bin/whisper-cli
+WHISPER_MODEL_PATH=models/ggml-base.en.bin
 ```
 
-3. Deploy slash commands:
+3. Deploy slash commands (Discord):
 
 ```bash
 npm run deploy-commands
 ```
 
-4. Start the bot (dev mode):
+4. Start the bridge (dev mode):
 
 ```bash
 npm run dev
 ```
 
-### Install maestro-discord CLI (dev)
-
-The `maestro-discord` CLI lets your Maestro agents reach out to you on Discord — for example, to ping you when a long-running task finishes. See [docs/api.md](docs/api.md) for usage.
-
-After building the project (`npm run build`), create a shell wrapper.
-
-macOS / Linux:
-
-```bash
-printf '#!/bin/bash\nnode "%s/dist/cli/maestro-discord.js" "$@"\n' "$(pwd)" | sudo tee /usr/local/bin/maestro-discord && sudo chmod +x /usr/local/bin/maestro-discord
-```
-
-Windows (PowerShell) — writes the wrapper to `%USERPROFILE%\bin` and adds it to your user `PATH`:
-
-```powershell
-$repoPath = (Get-Location).Path
-$binDir = "$env:USERPROFILE\bin"
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-@"
-@echo off
-node "$repoPath\dist\cli\maestro-discord.js" %*
-"@ | Out-File -FilePath "$binDir\maestro-discord.cmd" -Encoding ASCII
-
-# Add $binDir to user PATH if it isn't already (restart your shell afterwards)
-$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-if (-not ($userPath -split ';' -contains $binDir)) {
-    [Environment]::SetEnvironmentVariable('PATH', "$binDir;$userPath", 'User')
-}
-```
-
-Or use `npm link`:
+Optional for source-based local CLI usage:
 
 ```bash
 npm link
@@ -127,9 +107,9 @@ npm link
 
 ## Voice Transcription (optional)
 
-When a user posts a Discord **voice message** (the mic-button recording, not an arbitrary `.ogg` upload) in a session thread, the bot transcribes the audio with `whisper.cpp` and forwards the transcript to the agent. The original `.ogg` is **not** sent to the agent — only the transcribed text — and a `🎧` reaction marks the message while transcription runs.
+When a user posts a Discord **voice message** (the mic-button recording, not an arbitrary `.ogg` upload) in a session thread, the bridge transcribes the audio with `whisper.cpp` and forwards the transcript to the agent. The original `.ogg` is **not** sent to the agent — only the transcribed text — and a `🎧` reaction marks the message while transcription runs.
 
-If the dependencies below are missing, the bot starts normally and voice messages are forwarded as plain attachments with a one-line advisory; no other functionality is affected.
+If the dependencies below are missing, the bridge starts normally and voice messages are forwarded as plain attachments with a one-line advisory; no other functionality is affected.
 
 **Behavior notes:**
 
@@ -147,17 +127,17 @@ brew install ffmpeg whisper-cli
 
    On Linux/Windows, install ffmpeg via your package manager and either build `whisper-cli` from the [whisper.cpp](https://github.com/ggerganov/whisper.cpp) repo (then symlink the binary into `~/.local/bin`) or use [Linuxbrew](https://docs.brew.sh/Homebrew-on-Linux).
 
-2. **Production install (curl one-liner)** — the installer detects `ffmpeg` + `whisper-cli` on `PATH` and asks whether to enable voice transcription. If you say yes, it asks whether you already have a `ggml-*.bin` model file — paste the absolute path to reuse it, or let it download `ggml-base.en.bin` (~142 MB) into `~/.local/share/maestro-discord/models/`. Resolved **absolute** paths are written into `~/.config/maestro-discord/.env`, so the systemd/launchd service finds them regardless of `PATH`.
+2. **Production install (curl one-liner)** — the installer detects `ffmpeg` + `whisper-cli` on `PATH` and asks whether to enable voice transcription. If you say yes, it asks whether you already have a `ggml-*.bin` model file — paste the absolute path to reuse it, or let it download `ggml-base.en.bin` (~142 MB) into `~/.local/share/maestro-relay/models/`. Resolved **absolute** paths are written into `~/.config/maestro-relay/.env`, so the systemd/launchd service finds them regardless of `PATH`.
 
    Non-interactive escape hatches:
 
    ```bash
-   MAESTRO_DISCORD_VOICE=1 \
-   MAESTRO_DISCORD_MODEL=/abs/path/to/ggml-base.en.bin \
-     bash -c "$(curl -fsSL https://raw.githubusercontent.com/RunMaestro/Maestro-Discord/main/install.sh)"
+   MAESTRO_RELAY_VOICE=1 \
+   MAESTRO_RELAY_MODEL=/abs/path/to/ggml-base.en.bin \
+     bash -c "$(curl -fsSL https://raw.githubusercontent.com/RunMaestro/Maestro-Relay/main/install.sh)"
    ```
 
-   `MAESTRO_DISCORD_VOICE=0` opts out; omitting `MAESTRO_DISCORD_MODEL` triggers the download.
+   `MAESTRO_RELAY_VOICE=0` opts out; omitting `MAESTRO_RELAY_MODEL` triggers the download.
 
 3. **Source install** (npm-based) — there's no wizard; download a model and set the paths yourself:
 
@@ -172,7 +152,14 @@ WHISPER_CLI_PATH=/home/you/.local/bin/whisper-cli
 WHISPER_MODEL_PATH=models/ggml-base.en.bin
 ```
 
-The bot probes these at startup; any missing piece is logged as `⚠️ Transcription disabled: …` and transcription is skipped at runtime. After editing `.env`, restart with `maestro-discord-ctl restart`.
+The bridge probes these at startup; any missing piece is logged as `⚠️ Transcription disabled: …` and transcription is skipped at runtime.
+
+## Production run
+
+```bash
+npm run build
+npm start
+```
 
 ## Tests
 
@@ -186,7 +173,7 @@ Coverage:
 npm run build && node --test --experimental-test-coverage dist/__tests__/**/*.test.js
 ```
 
-## Slash commands
+## Slash commands (Discord)
 
 | Command                    | Description                                                   |
 | -------------------------- | ------------------------------------------------------------- |
@@ -208,15 +195,24 @@ npm run build && node --test --experimental-test-coverage dist/__tests__/**/*.te
 
 ## How it works
 
-Mention the bot or run `/session new` in an agent channel to create a thread, then chat — messages are queued and forwarded to the agent via `maestro-cli`. See [docs/architecture.md](docs/architecture.md) for the full message flow, thread ownership model, and project layout.
+Mention the bot or run `/session new` in an agent channel to create a thread, then chat — messages are queued and forwarded to the agent via `maestro-cli`. See [docs/architecture.md](docs/architecture.md) for the full message flow, the kernel/provider split, and how to add a new provider.
 
-## Maestro-to-Discord Messaging
+## Agent → chat messaging
 
-Agents can push messages to Discord via the `maestro-discord` CLI / HTTP API. See [docs/api.md](docs/api.md) for usage, endpoints, and error codes.
+Agents can push messages to chat via the `maestro-relay` CLI / HTTP API. See [docs/api.md](docs/api.md) for usage, endpoints, and error codes.
+
+## Migration from `discord-maestro`
+
+This project was renamed from `discord-maestro` / `Maestro-Discord`. To smooth upgrades:
+
+- The `maestro-discord` binary is preserved as an alias of `maestro-relay`. Existing scripts that call `maestro-discord send …` keep working unchanged.
+- All `DISCORD_*` env vars are unchanged. New optional `ENABLED_PROVIDERS` defaults to `discord`.
+- The SQLite database upgrades automatically on first start: `agent_channels` gains a `provider` column (existing rows default to `discord`); `agent_threads` is renamed to `discord_agent_threads` with rows preserved. No manual migration needed.
+- The HTTP `/api/send` endpoint accepts an optional `provider` field that defaults to `discord`; existing callers are unaffected.
 
 ## Data storage
 
-The bot stores channel ↔ agent mappings in a local SQLite database at `maestro-bot.db`.
+The bridge stores channel ↔ agent mappings in a local SQLite database at `maestro-bot.db`.
 Delete this file to reset all channel bindings.
 
 ## Discord bot permissions
