@@ -69,7 +69,7 @@ The Slack provider deliberately ships a smaller command surface than Discord —
 - **Reactions**: `⏳` (`hourglass_flowing_sand`) while a message is queued. The Slack API requires emoji *names*, not Unicode characters; the adapter maps `⏳ 🎧 ✅ ❌` to the corresponding Slack names — pass any of them to `provider.react()` and the mapping happens automatically.
 - **Typing indicator**: not exposed by Slack's Web API; `sendTyping` is a no-op on this provider.
 - **Usage stats** are appended below each agent reply (tokens, cost, context %).
-- **Channel naming**: when `/agents new` creates a channel, the name is derived as `maestro-<sanitized-agent-name>` (lowercased, non-`a-z0-9-_` stripped, capped at 70 chars). Archived channels with the same name are unarchived; if unarchive fails, a `-<timestamp>` suffix is appended.
+- **Channel naming**: agent channels are named `maestro-<sanitized-agent-name>-<id-prefix>`, where `id-prefix` is the first 8 alphanumeric characters of the agent ID. The agent ID makes the name unique even when two different agents normalize to the same display name. The whole result is capped at 80 characters. Both `/agents new` and the HTTP-API auto-create path (`POST /api/send`) use the same helper. If the channel already exists but is archived, the adapter unarchives it; if unarchive fails, it falls back to creating a fresh channel with a `-<timestamp>` suffix appended to the base name.
 
 ## Storage
 
@@ -88,5 +88,5 @@ The Slack provider deliberately ships a smaller command surface than Discord —
 - **`⏳` reaction never appears** → check the bot has `reactions:write` and was reinstalled to the workspace after adding the scope. The adapter logs reaction failures via `logger.error('queue:react', …)`.
 - **`signing_secret_missing` or HTTP 401 from Slack** → fill in `SLACK_SIGNING_SECRET`. Required even in Socket Mode setups for parts of the Bolt SDK.
 - **Bot is online but ignores thread replies** → confirm the thread is in `slack_agent_conversations` (`/session new` or a mention created it) and that the message author matches `owner_user_id`.
-- **Channel creation fails with `name_taken`** → an archived channel exists with that name and unarchive failed. The adapter falls back to `<name>-<timestamp>`; if that also fails, create the channel manually and re-run `/agents new`.
+- **Channel creation fails with `name_taken`** → an archived channel with the same `maestro-<…>-<id-prefix>` name exists and unarchive failed. The adapter falls back to `<name>-<timestamp>`; if that also fails (e.g. workspace channel limits, scope missing), create the channel manually and re-run `/agents new`.
 - **Slack rejects the emoji name** → the adapter maps `⏳ 🎧 ✅ ❌`. Other Unicode emoji are passed through unchanged; if you call `provider.react()` from custom code with a Unicode emoji that's not in the map, add it to `UNICODE_TO_SLACK` in `src/providers/slack/adapter.ts`.

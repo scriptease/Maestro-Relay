@@ -37,6 +37,88 @@ export function isThreadTs(id: string): boolean {
   return /^\d+\.\d+$/.test(id);
 }
 
+/**
+ * Build a Slack channel name for an agent.
+ *
+ * Format: `maestro-<sanitized-name>-<id-prefix>` capped at 80 chars.
+ * The id-prefix (8 alphanumeric chars from agent.id) is what makes the
+ * name unique — without it, two agents whose names normalize to the
+ * same string would collapse to the same channel.
+ */
+export function buildAgentChannelName(agent: { id: string; name: string }): string {
+  const sanitizedName = agent.name
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 60);
+  const baseName = sanitizedName || 'agent';
+  const idPrefix = agent.id.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+  const suffix = idPrefix ? `-${idPrefix}` : '';
+  return `maestro-${baseName}${suffix}`.slice(0, 80);
+}
+
+/**
+ * Look up an existing Slack channel for an agent or create a fresh one.
+ * Returns `{ channelId, isNew }`. If the channel exists but is archived,
+ * tries to unarchive; if that fails, creates a new channel with a
+ * `-<timestamp>` suffix to avoid `name_taken`.
+ */
+export async function findOrCreateSlackChannel(
+  client: WebClient,
+  agent: { id: string; name: string },
+): Promise<{ channelId: string; isNew: boolean }> {
+  const channelName = buildAgentChannelName(agent);
+
+  let channelId: string | undefined;
+  let isNew = false;
+  let isArchived = false;
+
+  try {
+    const listRes = await client.conversations.list({
+      exclude_archived: false,
+      types: 'public_channel',
+      limit: 1000,
+    });
+    const found = listRes.channels?.find((ch) => ch.name === channelName);
+    if (found?.id) {
+      channelId = found.id;
+      isArchived = !!found.is_archived;
+    }
+  } catch {
+    // ignore — will create below
+  }
+
+  if (channelId && isArchived) {
+    try {
+      await client.conversations.unarchive({ channel: channelId });
+    } catch {
+      // Unarchive failed (e.g. permissions, channel locked). Fall back
+      // to a fresh timestamped channel — same trick the slash command
+      // uses, mirrored here so HTTP-API-driven flows behave the same.
+      const fallbackName = `${channelName}-${Date.now().toString().slice(-6)}`.slice(0, 80);
+      const res = await client.conversations.create({
+        name: fallbackName,
+        is_private: false,
+      });
+      if (!res.channel?.id) {
+        throw new Error(`Failed to create Slack channel for agent ${agent.id}`);
+      }
+      channelId = res.channel.id;
+      isNew = true;
+    }
+  } else if (!channelId) {
+    const res = await client.conversations.create({ name: channelName, is_private: false });
+    if (!res.channel?.id) {
+      throw new Error(`Failed to create Slack channel for agent ${agent.id}`);
+    }
+    channelId = res.channel.id;
+    isNew = true;
+  }
+
+  return { channelId: channelId!, isNew };
+}
+
 export class SlackProvider implements BridgeProvider {
   readonly name = 'slack';
   private app: App | null = null;
@@ -261,45 +343,7 @@ export class SlackProvider implements BridgeProvider {
       const agent = allAgents.find((a) => a.id === agentId);
       if (!agent) throw new Error(`Agent not found: ${agentId}`);
 
-      const sanitizedName = agent.name
-        .toLowerCase()
-        .replace(/[^a-z0-9-_]/g, '-')
-        .replace(/-+/g, '-')
-        .substring(0, 70);
-      const channelName = `maestro-${sanitizedName}`;
-
-      let channelId: string | undefined;
-
-      try {
-        const listRes = await this.client.conversations.list({
-          exclude_archived: false,
-          types: 'public_channel',
-          limit: 1000,
-        });
-        const found = listRes.channels?.find((ch) => ch.name === channelName);
-        if (found?.id) {
-          channelId = found.id;
-          if (found.is_archived) {
-            try {
-              await this.client.conversations.unarchive({ channel: channelId });
-            } catch {
-              channelId = undefined;
-            }
-          }
-        }
-      } catch {
-        // ignore — will create below
-      }
-
-      if (!channelId) {
-        const res = await this.client.conversations.create({
-          name: channelName,
-          is_private: false,
-        });
-        if (!res.channel?.id) throw new Error(`Failed to create Slack channel for agent ${agentId}`);
-        channelId = res.channel.id;
-      }
-
+      const { channelId } = await findOrCreateSlackChannel(this.client, agent);
       channelDb.register(channelId, agent.id, agent.name);
       return { channelId, agentId: agent.id, agentName: agent.name };
     })();

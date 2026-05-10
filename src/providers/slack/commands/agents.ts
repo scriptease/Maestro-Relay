@@ -1,10 +1,12 @@
-import type { SlackCommandMiddlewareArgs, SayFn, KnownBlock } from '@slack/bolt';
+import type { SlackCommandMiddlewareArgs, SayFn } from '@slack/bolt';
+import type { KnownBlock } from '@slack/types';
 import { WebClient } from '@slack/web-api';
 import { slackConfig } from '../config';
 import { channelDb } from '../channelsDb';
 import { conversationDb } from '../conversationsDb';
 import { maestro } from '../../../core/maestro';
 import { logger } from '../../../core/logger';
+import { findOrCreateSlackChannel } from '../adapter';
 
 export async function handle({
   ack,
@@ -104,56 +106,18 @@ async function handleNew(
   }
 
   const client = new WebClient(slackConfig.token);
-  const sanitizedName = agent.name
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]/g, '-')
-    .replace(/-+/g, '-')
-    .substring(0, 70);
-  const channelName = `maestro-${sanitizedName}`;
 
-  let newChannelId: string | undefined;
-  let isArchived = false;
-
+  let newChannelId: string;
   try {
-    const listRes = await client.conversations.list({
-      exclude_archived: false,
-      types: 'public_channel',
-      limit: 1000,
-    });
-    const existing = listRes.channels?.find((ch) => ch.name === channelName);
-    if (existing?.id) {
-      newChannelId = existing.id;
-      isArchived = existing.is_archived ?? false;
-    }
+    const result = await findOrCreateSlackChannel(client, agent);
+    newChannelId = result.channelId;
   } catch (err) {
     void logger.error(
-      'slack/agents:conversations.list',
+      'slack/agents:findOrCreate',
       err instanceof Error ? err.message : String(err),
     );
-    // ignore — will create below
-  }
-
-  if (!newChannelId) {
-    const res = await client.conversations.create({ name: channelName, is_private: false });
-    if (!res.channel?.id) {
-      await say('Failed to create channel for agent.');
-      return;
-    }
-    newChannelId = res.channel.id;
-  }
-
-  if (isArchived) {
-    try {
-      await client.conversations.unarchive({ channel: newChannelId });
-    } catch {
-      const fallbackName = `${channelName}-${Date.now().toString().slice(-6)}`.substring(0, 80);
-      const res = await client.conversations.create({ name: fallbackName, is_private: false });
-      if (!res.channel?.id) {
-        await say('Failed to create channel for agent.');
-        return;
-      }
-      newChannelId = res.channel.id;
-    }
+    await say('Failed to create channel for agent.');
+    return;
   }
 
   if (userId) {
